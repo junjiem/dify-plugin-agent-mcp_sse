@@ -260,9 +260,6 @@ class McpStreamableHttpClient(McpClient):
         }
         response = self.send_message(init_data)
         self.session_id = response.headers.get("mcp-session-id", None)
-        response_data = response.json()
-        if "error" in response_data:
-            raise Exception(f"MCP Server initialize error: {response_data['error']}")
         notify_data = {
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
