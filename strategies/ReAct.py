@@ -53,8 +53,8 @@ class AgentPromptEntity(BaseModel):
 
 
 class ReActAgentStrategy(AgentStrategy):
-    def __init__(self, session):
-        super().__init__(session)
+    def __init__(self, runtime, session):
+        super().__init__(runtime, session)
         self.query = ""
         self.instruction = ""
         self.history_prompt_messages = []
