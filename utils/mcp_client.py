@@ -1,7 +1,7 @@
 import json
 import logging
+import uuid
 from abc import ABC, abstractmethod
-from queue import Queue, Empty
 from threading import Event, Thread
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -51,8 +51,7 @@ class McpSseClient(McpClient):
         self.sse_read_timeout = sse_read_timeout
         self.endpoint_url = None
         self.client = httpx.Client(headers=headers)
-        self._request_id = 0
-        self.message_queue = Queue()
+        self.message_dict = {}
         self.response_ready = Event()
         self.should_stop = Event()
         self._listen_thread = None
@@ -91,7 +90,7 @@ class McpSseClient(McpClient):
                         case "message":
                             message = json.loads(sse.data)
                             logging.debug(f"{self.name} - Received server message: {message}")
-                            self.message_queue.put(message)
+                            self.message_dict[message["id"]] = message
                             self.response_ready.set()
                         case _:
                             logging.warning(f"{self.name} - Unknown SSE event: {sse.event}")
@@ -110,7 +109,7 @@ class McpSseClient(McpClient):
         response = self.client.post(
             url=self.endpoint_url,
             json=data,
-            headers={'Content-Type': 'application/json'},
+            headers={'Content-Type': 'application/json', 'trace-id': data["id"] if "id" in data else ""},
             timeout=self.timeout
         )
         response.raise_for_status()
@@ -120,15 +119,9 @@ class McpSseClient(McpClient):
             while True:
                 self.response_ready.wait()
                 self.response_ready.clear()
-                try:
-                    while True:
-                        message = self.message_queue.get_nowait()
-                        if "id" in message and message["id"] == message_id:
-                            self._request_id += 1
-                            return message
-                        self.message_queue.put(message)
-                except Empty:
-                    pass
+                if message_id in self.message_dict:
+                    message = self.message_dict.pop(message_id, None)
+                    return message
         return {}
 
     def connect(self) -> None:
@@ -158,7 +151,7 @@ class McpSseClient(McpClient):
     def initialize(self):
         init_data = {
             "jsonrpc": "2.0",
-            "id": self._request_id,
+            "id": uuid.uuid4().hex,
             "method": "initialize",
             "params": {
                 "protocolVersion": "2024-11-05",
@@ -184,7 +177,7 @@ class McpSseClient(McpClient):
     def list_tools(self):
         tools_data = {
             "jsonrpc": "2.0",
-            "id": self._request_id,
+            "id": uuid.uuid4().hex,
             "method": "tools/list",
             "params": {}
         }
@@ -196,7 +189,7 @@ class McpSseClient(McpClient):
     def call_tool(self, tool_name: str, tool_args: dict):
         call_data = {
             "jsonrpc": "2.0",
-            "id": self._request_id,
+            "id": uuid.uuid4().hex,
             "method": "tools/call",
             "params": {
                 "name": tool_name,
