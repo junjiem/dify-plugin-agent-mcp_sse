@@ -224,7 +224,7 @@ class McpStreamableHttpClient(McpClient):
             raise Exception(f"{self.name} - MCP Server connection close failed: {str(e)}")
 
     def send_message(self, data: dict) -> Response:
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "accept": "application/json"}
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         logging.debug(f"{self.name} - Sending client message: {data}")
@@ -269,6 +269,9 @@ class McpStreamableHttpClient(McpClient):
         }
         response = self.send_message(tools_data)
         response_data = response.json()
+        # to tolerate the case where the server always returns a batch response
+        if type(response_data) == list:
+            response_data = response_data[0]
         if "error" in response_data:
             raise Exception(f"MCP Server tools/list error: {response_data['error']}")
         return response_data.get("result", {}).get("tools", [])
@@ -285,6 +288,9 @@ class McpStreamableHttpClient(McpClient):
         }
         response = self.send_message(call_data)
         response_data = response.json()
+        # to tolerate the case where the server always returns a batch response
+        if type(response_data) == list:
+            response_data = response_data[0]
         if "error" in response_data:
             raise Exception(f"MCP Server tools/call error: {response_data['error']}")
         return response_data.get("result", {}).get("content", [])
