@@ -86,6 +86,10 @@ class FunctionCallingAgentStrategy(AgentStrategy):
         servers_config_json = fc_params.mcp_servers_config
         if servers_config_json:
             try:
+                # 检查字符串是否被额外的引号包裹
+                if servers_config_json.startswith('"') and servers_config_json.endswith('"'):
+                    # 移除额外的外层引号
+                    servers_config_json = servers_config_json[1:-1]
                 servers_config = json.loads(servers_config_json)
             except json.JSONDecodeError as e:
                 raise ValueError(f"mcp_servers_config must be a valid JSON string: {e}")
