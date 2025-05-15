@@ -270,7 +270,7 @@ class McpStreamableHttpClient(McpClient):
         response = self.send_message(tools_data)
         response_data = response.json()
         # to tolerate the case where the server always returns a batch response
-        if type(response_data) == list:
+        if isinstance(response_data, list):
             response_data = response_data[0]
         if "error" in response_data:
             raise Exception(f"MCP Server tools/list error: {response_data['error']}")
@@ -289,7 +289,7 @@ class McpStreamableHttpClient(McpClient):
         response = self.send_message(call_data)
         response_data = response.json()
         # to tolerate the case where the server always returns a batch response
-        if type(response_data) == list:
+        if isinstance(response_data, list):
             response_data = response_data[0]
         if "error" in response_data:
             raise Exception(f"MCP Server tools/call error: {response_data['error']}")
