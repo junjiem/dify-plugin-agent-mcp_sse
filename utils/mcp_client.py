@@ -7,8 +7,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from httpx import Response
-from httpx_sse import connect_sse
+from httpx_sse import connect_sse, EventSource
 
 
 class McpClient(ABC):
@@ -223,8 +222,8 @@ class McpStreamableHttpClient(McpClient):
         except Exception as e:
             raise Exception(f"{self.name} - MCP Server connection close failed: {str(e)}")
 
-    def send_message(self, data: dict) -> Response:
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    def send_message(self, data: dict):
+        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         logging.debug(f"{self.name} - Sending client message: {data}")
@@ -234,8 +233,17 @@ class McpStreamableHttpClient(McpClient):
             headers=headers,
             timeout=self.timeout
         )
-        logging.debug(f"{self.name} - Client message sent successfully: {response.status_code}")
-        return response
+        self.session_id = response.headers.get("mcp-session-id", None)
+        content_type = response.headers.get("content-type", "None")
+        if content_type == "text/event-stream":
+            for sse in EventSource(response).iter_sse():
+                if sse.event != "message":
+                    raise Exception(f"{self.name} - Unknown Server-Sent Event: {sse.event}")
+                return json.loads(sse.data)
+        elif content_type == "application/json":
+            return response.json() if response.content else {}
+        else:
+            raise Exception(f"{self.name} - Unsupported Content-Type: {content_type}")
 
     def initialize(self):
         init_data = {
@@ -252,13 +260,16 @@ class McpStreamableHttpClient(McpClient):
             }
         }
         response = self.send_message(init_data)
-        self.session_id = response.headers.get("mcp-session-id", None)
+        if "error" in response:
+            raise Exception(f"MCP Server initialize error: {response['error']}")
         notify_data = {
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
             "params": {}
         }
-        self.send_message(notify_data)
+        response = self.send_message(notify_data)
+        if "error" in response:
+            raise Exception(f"MCP Server notifications/initialized error: {response['error']}")
 
     def list_tools(self):
         tools_data = {
@@ -268,13 +279,9 @@ class McpStreamableHttpClient(McpClient):
             "params": {}
         }
         response = self.send_message(tools_data)
-        response_data = response.json()
-        # to tolerate the case where the server always returns a batch response
-        if isinstance(response_data, list):
-            response_data = response_data[0]
-        if "error" in response_data:
-            raise Exception(f"MCP Server tools/list error: {response_data['error']}")
-        return response_data.get("result", {}).get("tools", [])
+        if "error" in response:
+            raise Exception(f"MCP Server tools/list error: {response['error']}")
+        return response.get("result", {}).get("tools", [])
 
     def call_tool(self, tool_name: str, tool_args: dict):
         call_data = {
@@ -287,13 +294,9 @@ class McpStreamableHttpClient(McpClient):
             }
         }
         response = self.send_message(call_data)
-        response_data = response.json()
-        # to tolerate the case where the server always returns a batch response
-        if isinstance(response_data, list):
-            response_data = response_data[0]
-        if "error" in response_data:
-            raise Exception(f"MCP Server tools/call error: {response_data['error']}")
-        return response_data.get("result", {}).get("content", [])
+        if "error" in response:
+            raise Exception(f"MCP Server tools/call error: {response['error']}")
+        return response.get("result", {}).get("content", [])
 
 
 class McpClients:
