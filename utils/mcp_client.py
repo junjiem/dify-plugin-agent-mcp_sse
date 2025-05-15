@@ -224,7 +224,7 @@ class McpStreamableHttpClient(McpClient):
             raise Exception(f"{self.name} - MCP Server connection close failed: {str(e)}")
 
     def send_message(self, data: dict) -> Response:
-        headers = {"Content-Type": "application/json", "accept": "application/json"}
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         logging.debug(f"{self.name} - Sending client message: {data}")
