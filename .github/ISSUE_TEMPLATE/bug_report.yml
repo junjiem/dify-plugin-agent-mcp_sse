@@ -41,6 +41,11 @@ body:
         - Streamable HTTP
     validations:
       required: true
+  - type: input
+    attributes:
+      label: "LLM Model LLM模型"
+    validations:
+      required: true
   - type: textarea
     attributes:
       label: "Problem description 问题描述"
