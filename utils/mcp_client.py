@@ -249,9 +249,11 @@ class McpStreamableHttpClient(McpClient):
         logger.info(f"response headers: {response.headers}")
         if "mcp-session-id" in response.headers:
             self.session_id = response.headers.get("mcp-session-id")
-        content_type = response.headers.get("content-type", "None")
         logger.info(f"response content: {response.content}")
+        if not response.content:
+            return {}
         message = {}
+        content_type = response.headers.get("content-type", "None")
         if content_type == "text/event-stream":
             for sse in EventSource(response).iter_sse():
                 if sse.event != "message":
