@@ -71,6 +71,7 @@ class McpSseClient(McpClient):
                     method="GET",
                     url=self.url,
                     timeout=httpx.Timeout(self.timeout, read=self.sse_read_timeout),
+                    follow_redirects=True,
             ) as event_source:
                 event_source.response.raise_for_status()
                 logger.debug(f"{self.name} - SSE connection established")
