@@ -437,19 +437,17 @@ class ReActAgentStrategy(AgentStrategy):
         # query messages
         query_messages = self._organize_user_query(query, [])
 
+        # organize historic prompt messages
+        historic_messages = self.history_prompt_messages
+
         if assistant_messages:
-            # organize historic prompt messages
-            historic_messages = self.history_prompt_messages
             messages = [
                 system_message,
                 *historic_messages,
                 *query_messages,
                 *assistant_messages,
-                UserPromptMessage(content="continue"),
             ]
         else:
-            # organize historic prompt messages
-            historic_messages = self.history_prompt_messages
             messages = [system_message, *historic_messages, *query_messages]
 
         # join all messages
