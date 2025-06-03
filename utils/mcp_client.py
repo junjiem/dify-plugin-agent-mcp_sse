@@ -7,12 +7,13 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from httpx_sse import connect_sse, EventSource
 from dify_plugin.config.logger_format import plugin_logger_handler
+from httpx_sse import connect_sse, EventSource
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 logger.addHandler(plugin_logger_handler)
+
 
 class McpClient(ABC):
     """Interface for MCP client."""
@@ -53,7 +54,7 @@ class McpSseClient(McpClient):
         self.timeout = timeout
         self.sse_read_timeout = sse_read_timeout
         self.endpoint_url = None
-        self.client = httpx.Client(headers=headers)
+        self.client = httpx.Client(headers=headers, timeout=httpx.Timeout(timeout, read=sse_read_timeout))
         self.message_dict = {}
         self.response_ready = Event()
         self.should_stop = Event()
@@ -114,7 +115,7 @@ class McpSseClient(McpClient):
             url=self.endpoint_url,
             json=data,
             headers={'Content-Type': 'application/json', 'trace-id': data["id"] if "id" in data else ""},
-            timeout=self.timeout,
+            timeout=httpx.Timeout(self.timeout),
             follow_redirects=True,
         )
         response.raise_for_status()
@@ -223,7 +224,7 @@ class McpStreamableHttpClient(McpClient):
         self.name = name
         self.url = url
         self.timeout = timeout
-        self.client = httpx.Client(headers=headers)
+        self.client = httpx.Client(headers=headers, timeout=httpx.Timeout(timeout))
         self.session_id = None
 
     def close(self) -> None:
@@ -241,7 +242,7 @@ class McpStreamableHttpClient(McpClient):
             url=self.url,
             json=data,
             headers=headers,
-            timeout=self.timeout,
+            timeout=httpx.Timeout(self.timeout),
             follow_redirects=True,
         )
         logger.info(f"response status: {response.status_code} {response.reason_phrase}")
