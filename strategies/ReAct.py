@@ -499,10 +499,22 @@ class ReActAgentStrategy(AgentStrategy):
             if mcp_tool_instance:
                 # invoke MCP tool
                 tool_invoke_parameters = tool_call_args
-                result = mcp_clients.execute_tool(
+                content = mcp_clients.execute_tool(
                     tool_name=tool_call_name,
                     tool_args=tool_invoke_parameters,
                 )
+                if len(content) == 1:
+                    item = content[0]
+                    if item["type"] == "text":
+                        result = item["text"]
+                    elif item["type"] in ("image", "video"):
+                        result = json.dumps(item, ensure_ascii=False)
+                    elif item["type"] == "resource":
+                        result = json.dumps(item['resource'], ensure_ascii=False)
+                    else:
+                        result = json.dumps(item, ensure_ascii=False)
+                else:
+                    result = json.dumps(content, ensure_ascii=False)
             else:
                 # invoke tool
                 tool_invoke_parameters = {**tool_instance.runtime_parameters, **tool_call_args}

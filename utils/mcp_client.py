@@ -27,11 +27,11 @@ class McpClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_tools(self):
+    def list_tools(self) -> list[dict]:
         raise NotImplementedError
 
     @abstractmethod
-    def call_tool(self, tool_name: str, tool_args: dict):
+    def call_tool(self, tool_name: str, tool_args: dict) -> list[dict]:
         raise NotImplementedError
 
 
@@ -121,7 +121,8 @@ class McpSseClient(McpClient):
         response.raise_for_status()
         logger.info(f"response status: {response.status_code} {response.reason_phrase}")
         if not response.is_success:
-            raise ValueError(f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
+            raise ValueError(
+                f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
         if "id" in data:
             message_id = data["id"]
             while True:
@@ -184,7 +185,7 @@ class McpSseClient(McpClient):
         if "error" in response:
             raise Exception(f"MCP Server notifications/initialized error: {response['error']}")
 
-    def list_tools(self):
+    def list_tools(self) -> list[dict]:
         tools_data = {
             "jsonrpc": "2.0",
             "id": uuid.uuid4().hex,
@@ -196,7 +197,7 @@ class McpSseClient(McpClient):
             raise Exception(f"MCP Server tools/list error: {response['error']}")
         return response.get("result", {}).get("tools", [])
 
-    def call_tool(self, tool_name: str, tool_args: dict):
+    def call_tool(self, tool_name: str, tool_args: dict) -> list[dict]:
         call_data = {
             "jsonrpc": "2.0",
             "id": uuid.uuid4().hex,
@@ -247,7 +248,8 @@ class McpStreamableHttpClient(McpClient):
         )
         logger.info(f"response status: {response.status_code} {response.reason_phrase}")
         if not response.is_success:
-            raise ValueError(f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
+            raise ValueError(
+                f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
         logger.info(f"response headers: {response.headers}")
         if "mcp-session-id" in response.headers:
             self.session_id = response.headers.get("mcp-session-id")
@@ -294,7 +296,7 @@ class McpStreamableHttpClient(McpClient):
         if "error" in response:
             raise Exception(f"MCP Server notifications/initialized error: {response['error']}")
 
-    def list_tools(self):
+    def list_tools(self) -> list[dict]:
         tools_data = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -306,7 +308,7 @@ class McpStreamableHttpClient(McpClient):
             raise Exception(f"MCP Server tools/list error: {response['error']}")
         return response.get("result", {}).get("tools", [])
 
-    def call_tool(self, tool_name: str, tool_args: dict):
+    def call_tool(self, tool_name: str, tool_args: dict) -> list[dict]:
         call_data = {
             "jsonrpc": "2.0",
             "id": 2,
@@ -361,11 +363,12 @@ class McpClients:
                 tools = client.list_tools()
                 all_tools.extend(tools)
                 self._tools[server_name] = tools
+            logger.info(f"Fetching tools: {all_tools}")
             return all_tools
         except Exception as e:
-            raise RuntimeError(f"Error fetching tools: {str(e)}")
+            raise Exception(f"Error fetching tools: {str(e)}")
 
-    def execute_tool(self, tool_name: str, tool_args: dict[str, Any]):
+    def execute_tool(self, tool_name: str, tool_args: dict[str, Any]) -> list[dict]:
         if not self._tools:
             self.fetch_tools()
         tool_clients = {}
@@ -376,21 +379,12 @@ class McpClients:
         client = tool_clients.get(tool_name, None)
         try:
             if not client:
-                raise Exception(f"there is not a tool named {tool_name}")
-            result = client.call_tool(tool_name, tool_args)
-            if isinstance(result, dict) and "progress" in result:
-                progress = result["progress"]
-                total = result["total"]
-                percentage = (progress / total) * 100
-                logger.info(
-                    f"Progress: {progress}/{total} "
-                    f"({percentage:.1f}%)"
-                )
-            return f"Tool execution result: {result}"
+                raise Exception(f"There is not a tool named {tool_name}")
+            content = client.call_tool(tool_name, tool_args)
+            logger.info(f"Executing tool: {content}")
+            return content
         except Exception as e:
-            error_msg = f"Error executing tool: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            raise Exception(f"Error executing tool: {str(e)}")
 
     def close(self) -> None:
         for client in self._clients.values():
