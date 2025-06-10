@@ -36,7 +36,7 @@ parameters:
       zh_Hans: "MCP服务配置，支持多个MCP服务。"
   - name: mcp_resources_as_tools
     type: boolean
-    required: true
+    required: false
     default: true
     label:
       en_US: MCP Resources as Tools
@@ -46,7 +46,7 @@ parameters:
       zh_Hans: "将预设的 MCP Resources 作为 Tools 返回和调用。"
   - name: mcp_prompts_as_tools
     type: boolean
-    required: true
+    required: false
     default: true
     label:
       en_US: MCP Prompts as Tools
