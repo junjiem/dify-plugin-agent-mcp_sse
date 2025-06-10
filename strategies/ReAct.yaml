@@ -3,7 +3,7 @@ identity:
   author: junjiem
   label:
     en_US: ReAct (Support MCP Tools)
-    zh_Hans: ReAct (Support MCP Tools)
+    zh_Hans: ReAct (支持 MCP 工具)
 description:
   en_US: ReAct is a basic strategy for agent, model will use the Dify and MCP tools provided to perform the task.
   zh_Hans: ReAct 是一个基本的 Agent 策略，模型将使用提供的 Dify 和 MCP 工具来执行任务。
@@ -34,9 +34,29 @@ parameters:
     help:
       en_US: "MCP Servers config, support multiple MCP Server."
       zh_Hans: "MCP服务配置，支持多个MCP服务。"
+  - name: mcp_resources_as_tools
+    type: boolean
+    required: true
+    default: true
+    label:
+      en_US: MCP Resources as Tools
+      zh_Hans: MCP 资源作为工具
+    help:
+      en_US: "Fetch and call the preset MCP Resources as Tools."
+      zh_Hans: "将预设的 MCP Resources 作为 Tools 返回和调用。"
+  - name: mcp_prompts_as_tools
+    type: boolean
+    required: true
+    default: true
+    label:
+      en_US: MCP Prompts as Tools
+      zh_Hans: MCP 提示词作为工具
+    help:
+      en_US: "Fetch and call the preset MCP Prompts as Tools."
+      zh_Hans: "将预设的 MCP Prompts 作为 Tools 返回和调用。"
   - name: instruction
     type: string
-    required: true
+    required: false
     label:
       en_US: Instruction
       zh_Hans: 指令

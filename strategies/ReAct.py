@@ -108,7 +108,7 @@ class ReActAgentStrategy(AgentStrategy):
 
         # Init parameters
         self.query = react_params.query
-        self.instruction = react_params.instruction
+        self.instruction = react_params.instruction or self.instruction
         agent_scratchpad = []
         iteration_step = 1
         max_iteration_steps = react_params.maximum_iterations
@@ -141,13 +141,15 @@ class ReActAgentStrategy(AgentStrategy):
         mcp_clients = None
         mcp_tools = []
         mcp_tool_instances = {}
-        servers_config_json = react_params.mcp_servers_config
-        if servers_config_json:
+        mcp_servers_config = react_params.mcp_servers_config
+        mcp_resources_as_tools = react_params.mcp_resources_as_tools
+        mcp_prompts_as_tools = react_params.mcp_prompts_as_tools
+        if mcp_servers_config:
             try:
-                servers_config = json.loads(servers_config_json)
+                servers_config = json.loads(mcp_servers_config)
             except json.JSONDecodeError as e:
                 raise ValueError(f"mcp_servers_config must be a valid JSON string: {e}")
-            mcp_clients = McpClients(servers_config)
+            mcp_clients = McpClients(servers_config, mcp_resources_as_tools, mcp_prompts_as_tools)
             mcp_tools = mcp_clients.fetch_tools()
             mcp_tool_instances = {tool.get("name"): tool for tool in mcp_tools} if mcp_tools else {}
 

@@ -2,6 +2,7 @@ import json
 import logging
 import uuid
 from abc import ABC, abstractmethod
+from enum import Enum
 from threading import Event, Thread
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -9,6 +10,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from dify_plugin.config.logger_format import plugin_logger_handler
 from httpx_sse import connect_sse, EventSource
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -17,6 +19,20 @@ logger.addHandler(plugin_logger_handler)
 
 class McpClient(ABC):
     """Interface for MCP client."""
+
+    def __init__(self, name: str, url: str,
+                 headers: dict[str, Any] | None = None,
+                 timeout: float = 50,
+                 ):
+        self.name = name
+        self.url = url
+        self.headers = headers
+        self.timeout = timeout
+        self.id_counter = 0
+
+    def _get_next_id(self):
+        self.id_counter += 1
+        return self.id_counter
 
     @abstractmethod
     def close(self) -> None:
@@ -27,16 +43,115 @@ class McpClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def send_message(self, data: dict) -> dict:
+        raise NotImplementedError
+
     def list_tools(self) -> list[dict]:
-        raise NotImplementedError
+        request = {
+            "jsonrpc": "2.0",
+            "id": self._get_next_id(),
+            "method": "tools/list",
+            "params": {}
+        }
+        response = self.send_message(request)
+        if "error" in response:
+            error = response["error"]
+            # Method not found
+            if error["code"] == -32601:
+                return []
+            raise Exception(f"{self.name} - MCP Server tools/list error: {error}")
+        tools = response.get("result", {}).get("tools", [])
+        logger.info(f"{self.name} - MCP Server tools/list: {tools}")
+        return tools
 
-    @abstractmethod
-    def call_tool(self, tool_name: str, tool_args: dict) -> list[dict]:
-        raise NotImplementedError
+    def call_tool(self, name: str, arguments: dict) -> list[dict]:
+        data = {
+            "jsonrpc": "2.0",
+            "id": self._get_next_id(),
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": arguments
+            }
+        }
+        response = self.send_message(data)
+        if "error" in response:
+            error = response["error"]
+            raise Exception(f"{self.name} - MCP Server tools/call error: {error}")
+        content = response.get("result", {}).get("content", [])
+        logger.info(f"{self.name} - MCP Server tools/call: {content}")
+        return content
 
+    def list_resources(self) -> list[dict]:
+        data = {
+            "jsonrpc": "2.0",
+            "id": self._get_next_id(),
+            "method": "resources/list",
+            "params": {}
+        }
+        response = self.send_message(data)
+        if "error" in response:
+            error = response["error"]
+            # Method not found
+            if error["code"] == -32601:
+                return []
+            raise Exception(f"{self.name} - MCP Server resources/list error: {error}")
+        resources = response.get("result", {}).get("resources", [])
+        logger.info(f"{self.name} - MCP Server resources/list: {resources}")
+        return resources
 
-def remove_request_params(url: str) -> str:
-    return urljoin(url, urlparse(url).path)
+    def read_resource(self, uri: str) -> list[dict]:
+        data = {
+            "jsonrpc": "2.0",
+            "id": self._get_next_id(),
+            "method": "resources/read",
+            "params": {
+                "uri": uri
+            }
+        }
+        response = self.send_message(data)
+        if "error" in response:
+            error = response["error"]
+            raise Exception(f"{self.name} - MCP Server resources/read error: {error}")
+        contents = response.get("result", {}).get("contents", [])
+        logger.info(f"{self.name} - MCP Server resources/read: {contents}")
+        return contents
+
+    def list_prompts(self) -> list[dict]:
+        data = {
+            "jsonrpc": "2.0",
+            "id": self._get_next_id(),
+            "method": "prompts/list",
+            "params": {}
+        }
+        response = self.send_message(data)
+        if "error" in response:
+            error = response["error"]
+            # Method not found
+            if error["code"] == -32601:
+                return []
+            raise Exception(f"{self.name} - MCP Server prompts/list error: {error}")
+        prompts = response.get("result", {}).get("prompts", [])
+        logger.info(f"{self.name} - MCP Server prompts/list: {prompts}")
+        return prompts
+
+    def get_prompt(self, name: str, arguments: dict) -> list[dict]:
+        data = {
+            "jsonrpc": "2.0",
+            "id": self._get_next_id(),
+            "method": "prompts/get",
+            "params": {
+                "name": name,
+                "arguments": arguments
+            }
+        }
+        response = self.send_message(data)
+        if "error" in response:
+            error = response["error"]
+            raise Exception(f"{self.name} - MCP Server prompts/get error: {error}")
+        messages = response.get("result", {}).get("messages", [])
+        logger.info(f"{self.name} - MCP Server prompts/get: {messages}")
+        return messages
 
 
 class McpSseClient(McpClient):
@@ -49,9 +164,7 @@ class McpSseClient(McpClient):
                  timeout: float = 50,
                  sse_read_timeout: float = 50,
                  ):
-        self.name = name
-        self.url = url
-        self.timeout = timeout
+        super().__init__(name, url, headers, timeout)
         self.sse_read_timeout = sse_read_timeout
         self.endpoint_url = None
         self.client = httpx.Client(headers=headers, timeout=httpx.Timeout(timeout, read=sse_read_timeout))
@@ -64,9 +177,13 @@ class McpSseClient(McpClient):
         self._thread_exception = None
         self.connect()
 
+    @staticmethod
+    def remove_request_params(url: str) -> str:
+        return urljoin(url, urlparse(url).path)
+
     def _listen_messages(self) -> None:
         try:
-            logger.info(f"{self.name} - Connecting to SSE endpoint: {remove_request_params(self.url)}")
+            logger.info(f"{self.name} - Connecting to SSE endpoint: {self.remove_request_params(self.url)}")
             with connect_sse(
                     client=self.client,
                     method="GET",
@@ -104,7 +221,7 @@ class McpSseClient(McpClient):
             self._error_event.set()
             self._connected.set()
 
-    def send_message(self, data: dict):
+    def send_message(self, data: dict) -> dict:
         if not self.endpoint_url:
             if self._thread_exception:
                 raise ConnectionError(f"{self.name} - MCP Server connection failed: {self._thread_exception}")
@@ -114,7 +231,7 @@ class McpSseClient(McpClient):
         response = self.client.post(
             url=self.endpoint_url,
             json=data,
-            headers={'Content-Type': 'application/json', 'trace-id': data["id"] if "id" in data else ""},
+            headers={"Content-Type": "application/json"},
             timeout=httpx.Timeout(self.timeout),
             follow_redirects=True,
         )
@@ -185,33 +302,6 @@ class McpSseClient(McpClient):
         if "error" in response:
             raise Exception(f"MCP Server notifications/initialized error: {response['error']}")
 
-    def list_tools(self) -> list[dict]:
-        tools_data = {
-            "jsonrpc": "2.0",
-            "id": uuid.uuid4().hex,
-            "method": "tools/list",
-            "params": {}
-        }
-        response = self.send_message(tools_data)
-        if "error" in response:
-            raise Exception(f"MCP Server tools/list error: {response['error']}")
-        return response.get("result", {}).get("tools", [])
-
-    def call_tool(self, tool_name: str, tool_args: dict) -> list[dict]:
-        call_data = {
-            "jsonrpc": "2.0",
-            "id": uuid.uuid4().hex,
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": tool_args
-            }
-        }
-        response = self.send_message(call_data)
-        if "error" in response:
-            raise Exception(f"MCP Server tools/call error: {response['error']}")
-        return response.get("result", {}).get("content", [])
-
 
 class McpStreamableHttpClient(McpClient):
     """
@@ -222,9 +312,7 @@ class McpStreamableHttpClient(McpClient):
                  headers: dict[str, Any] | None = None,
                  timeout: float = 50,
                  ):
-        self.name = name
-        self.url = url
-        self.timeout = timeout
+        super().__init__(name, url, headers, timeout)
         self.client = httpx.Client(headers=headers, timeout=httpx.Timeout(timeout))
         self.session_id = None
 
@@ -234,7 +322,7 @@ class McpStreamableHttpClient(McpClient):
         except Exception as e:
             raise Exception(f"{self.name} - MCP Server connection close failed: {str(e)}")
 
-    def send_message(self, data: dict):
+    def send_message(self, data: dict) -> dict:
         headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
@@ -296,36 +384,22 @@ class McpStreamableHttpClient(McpClient):
         if "error" in response:
             raise Exception(f"MCP Server notifications/initialized error: {response['error']}")
 
-    def list_tools(self) -> list[dict]:
-        tools_data = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/list",
-            "params": {}
-        }
-        response = self.send_message(tools_data)
-        if "error" in response:
-            raise Exception(f"MCP Server tools/list error: {response['error']}")
-        return response.get("result", {}).get("tools", [])
 
-    def call_tool(self, tool_name: str, tool_args: dict) -> list[dict]:
-        call_data = {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": tool_args
-            }
-        }
-        response = self.send_message(call_data)
-        if "error" in response:
-            raise Exception(f"MCP Server tools/call error: {response['error']}")
-        return response.get("result", {}).get("content", [])
+class ActionType(Enum):
+    TOOL = "tool"
+    RESOURCE = "resource"
+    PROMPT = "prompt"
+
+
+class ToolAction(BaseModel):
+    tool_name: str
+    server_name: str
+    action_type: ActionType
+    action_feature: dict
 
 
 class McpClients:
-    def __init__(self, servers_config: dict[str, Any]):
+    def __init__(self, servers_config: dict[str, Any], resources_as_tools: bool = False, prompts_as_tools: bool = False):
         if "mcpServers" in servers_config:
             servers_config = servers_config["mcpServers"]
         self._clients = {
@@ -334,7 +408,9 @@ class McpClients:
         }
         for client in self._clients.values():
             client.initialize()
-        self._tools = {}
+        self._resources_as_tools = resources_as_tools
+        self._prompts_as_tools = prompts_as_tools
+        self._tool_actions: dict[str, ToolAction] = {}
 
     @staticmethod
     def init_client(name: str, config: dict[str, Any]) -> McpClient:
@@ -360,29 +436,155 @@ class McpClients:
         try:
             all_tools = []
             for server_name, client in self._clients.items():
+                # tools list
                 tools = client.list_tools()
-                all_tools.extend(tools)
-                self._tools[server_name] = tools
+                for tool in tools:
+                    name = tool["name"]
+                    self._tool_actions[name] = ToolAction(
+                        tool_name=name,
+                        server_name=server_name,
+                        action_type=ActionType.TOOL,
+                        action_feature=tool,
+                    )
+                    all_tools.append(tool)
+
+                # resources list
+                if self._resources_as_tools:
+                    resources = client.list_resources()
+                    for resource in resources:
+                        resource_name = resource["name"]
+                        name = resource_name.replace(' ', '_').lower()
+                        if name in self._tool_actions:
+                            name = uuid.uuid4().hex
+                        name = f"resource/{name}"
+                        self._tool_actions[name] = ToolAction(
+                            tool_name=name,
+                            server_name=server_name,
+                            action_type=ActionType.RESOURCE,
+                            action_feature=resource,
+                        )
+                        resource_description = resource.get("description", "")
+                        resource_mime_type = resource.get("mimeType", None)
+                        resource_size = resource.get("size", None)
+                        description = (
+                                f"Read the resource '{resource_name}' from MCP Server."
+                                + (f" Description: {resource_description}" if resource_description else "")
+                                + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
+                                + (f" Size: {resource_size}" if resource_size else "")
+                        )
+                        tool = {
+                            "name": name,
+                            "description": description,
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        }
+                        all_tools.append(tool)
+
+                # prompts list
+                if self._prompts_as_tools:
+                    prompts = client.list_prompts()
+                    for prompt in prompts:
+                        prompt_name = prompt["name"]
+                        name = f"prompt/{prompt_name}"
+                        self._tool_actions[name] = ToolAction(
+                            tool_name=name,
+                            server_name=server_name,
+                            action_type=ActionType.PROMPT,
+                            action_feature=prompt,
+                        )
+                        prompt_description = prompt.get("description", "")
+                        description = (
+                                f"Use the prompt template '{prompt_name}' from MCP Server."
+                                + (f" Description: {prompt_description}" if prompt_description else "")
+                        )
+                        prompt_arguments = prompt.get("arguments", [])
+                        properties = {}
+                        required = []
+                        for prompt_argument in prompt_arguments:
+                            argument_name = prompt_argument["name"]
+                            argument_description = prompt_argument.get("description", "")
+                            properties[argument_name] = {
+                                "type": "string",
+                                "description": argument_description
+                            }
+                            if "required" in prompt_argument:
+                                required.append(prompt_argument["required"])
+                        tool = {
+                            "name": name,
+                            "description": description,
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": properties,
+                                "required": required
+                            }
+                        }
+                        all_tools.append(tool)
+
             logger.info(f"Fetching tools: {all_tools}")
             return all_tools
         except Exception as e:
             raise Exception(f"Error fetching tools: {str(e)}")
 
     def execute_tool(self, tool_name: str, tool_args: dict[str, Any]) -> list[dict]:
-        if not self._tools:
+        if not self._tool_actions:
             self.fetch_tools()
-        tool_clients = {}
-        for server_name, tools in self._tools.items():
-            for tool in tools:
-                if server_name in self._clients:
-                    tool_clients[tool["name"]] = self._clients[server_name]
-        client = tool_clients.get(tool_name, None)
+        if tool_name not in self._tool_actions:
+            raise Exception(f"There is not a tool named {tool_name!r}")
+        tool_action = self._tool_actions[tool_name]
+        server_name = tool_action.server_name
+        logger.info(f"Executing tool! server name: {server_name}, tool name: {tool_name}, tool arguments: {tool_args}")
+        if server_name not in self._clients:
+            raise Exception(f"There is not a MCP Server named {server_name!r}")
+        client = self._clients[server_name]
+        action_type = tool_action.action_type
         try:
-            if not client:
-                raise Exception(f"There is not a tool named {tool_name}")
-            content = client.call_tool(tool_name, tool_args)
-            logger.info(f"Executing tool: {content}")
-            return content
+            tool_contents = []
+            if action_type == ActionType.TOOL:
+                tool_contents = client.call_tool(tool_name, tool_args)
+            elif action_type == ActionType.RESOURCE:
+                resource = tool_action.action_feature
+                contents = client.read_resource(resource["uri"])
+                for content in contents:
+                    if "text" in content:
+                        tool_contents.append({
+                          "type": "resource",
+                          "resource": {
+                            "uri": content["uri"],
+                            "mimeType": content.get("mimeType", "text/plain"),
+                            "text": content["text"]
+                          }
+                        })
+                    elif "blob" in content:
+                        tool_contents.append({
+                          "type": "resource",
+                          "resource": {
+                            "uri": content["uri"],
+                            "mimeType": content.get("mimeType", None),
+                            "blob": content["blob"]
+                          }
+                        })
+                    else:
+                        raise Exception(f"Unsupported resource: {content}")
+            elif action_type == ActionType.PROMPT:
+                name = tool_name[len("prompt/"):]
+                messages = client.get_prompt(name, tool_args)
+                text = ""
+                for message in messages:
+                    role = message["role"]
+                    content = message["content"]
+                    content_text = content.get("text", str(content))
+                    text += f"{role}: {content_text}\n"
+                tool_contents.append({
+                  "type": "text",
+                  "text": text.strip()
+                })
+            else:
+                raise Exception(f"Unsupported Action type: {action_type}")
+            logger.info(f"Executing tool: {tool_contents}")
+            return tool_contents
         except Exception as e:
             raise Exception(f"Error executing tool: {str(e)}")
 
