@@ -40,6 +40,8 @@ class ReActParams(BaseModel):
     model: AgentModelConfig
     tools: list[ToolEntity] | None
     mcp_servers_config: str | None
+    mcp_resources_as_tools: bool = False
+    mcp_prompts_as_tools: bool = False
     maximum_iterations: int = 3
 
 
