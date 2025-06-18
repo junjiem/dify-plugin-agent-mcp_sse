@@ -118,6 +118,23 @@ class McpClient(ABC):
         logger.info(f"{self.name} - MCP Server resources/read: {contents}")
         return contents
 
+    def list_resources_templates(self) -> list[dict]:
+        data = {
+            "jsonrpc": "2.0",
+            "id": self._get_next_id(),
+            "method": "resources/templates/list"
+        }
+        response = self.send_message(data)
+        if "error" in response:
+            error = response["error"]
+            # Method not found
+            if error["code"] == -32601:
+                return []
+            raise Exception(f"{self.name} - MCP Server resources/templates/list error: {error}")
+        resources = response.get("result", {}).get("resourceTemplates", [])
+        logger.info(f"{self.name} - MCP Server resources/templates/list: {resources}")
+        return resources
+
     def list_prompts(self) -> list[dict]:
         data = {
             "jsonrpc": "2.0",
@@ -389,6 +406,7 @@ class McpStreamableHttpClient(McpClient):
 class ActionType(Enum):
     TOOL = "tool"
     RESOURCE = "resource"
+    RESOURCE_TEMPLATE = "resource_template"
     PROMPT = "prompt"
 
 
@@ -456,10 +474,11 @@ class McpClients:
                     )
                     all_tools.append(tool)
 
-                # resources list
+                # resources and resources templates list
                 if self._resources_as_tools:
                     resources = client.list_resources()
-                    for resource in resources:
+                    resources_templates = client.list_resources_templates()
+                    for resource in resources + resources_templates:
                         resource_name = resource["name"]
                         name = (re.sub(r'[^a-zA-Z0-9 _-]', '', resource_name)
                                 .replace(' ', '_').lower())
@@ -468,30 +487,52 @@ class McpClients:
                             name = f"{server_name}__{name}"
                         if name in self._tool_actions:
                             name = f"resource__{uuid.uuid4().hex}"
+                        resource_description = resource.get("description", "")
+                        resource_mime_type = resource.get("mimeType", None)
+                        properties = {}
+                        required = []
+                        if "uri" in resource:
+                            uri = resource["uri"]
+                            action_type = ActionType.RESOURCE
+                            resource_size = resource.get("size", None)
+                            description = (
+                                    f"Read the resource '{resource_name}' from MCP Server."
+                                    f" URI: {uri}"
+                                    + (f" Description: {resource_description}" if resource_description else "")
+                                    + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
+                                    + (f" Size: {resource_size}" if resource_size else "")
+                            )
+                        elif "uriTemplate" in resource:
+                            uri_template = resource["uriTemplate"]
+                            action_type = ActionType.RESOURCE_TEMPLATE
+                            description = (
+                                    f"Read the resource '{resource_name}' from MCP Server."
+                                    f" URI template: {uri_template}"
+                                    + (f" Description: {resource_description}" if resource_description else "")
+                                    + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
+                            )
+                            properties = {
+                                "uri": {
+                                    "type": "string",
+                                    "description": f"The URI of this resource. uriTemplate: {uri_template}"
+                                }
+                            }
+                            required = ["uriTemplate"]
+                        else:
+                            raise Exception(f"Unsupported resource: {resource}")
                         self._tool_actions[name] = ToolAction(
                             tool_name=name,
                             server_name=server_name,
-                            action_type=ActionType.RESOURCE,
+                            action_type=action_type,
                             action_feature=resource,
-                        )
-                        uri = resource["uri"]
-                        resource_description = resource.get("description", "")
-                        resource_mime_type = resource.get("mimeType", None)
-                        resource_size = resource.get("size", None)
-                        description = (
-                                f"Read the resource '{resource_name}' from MCP Server."
-                                f" URI: {uri}"
-                                + (f" Description: {resource_description}" if resource_description else "")
-                                + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
-                                + (f" Size: {resource_size}" if resource_size else "")
                         )
                         tool = {
                             "name": name,
                             "description": description,
                             "inputSchema": {
                                 "type": "object",
-                                "properties": {},
-                                "required": []
+                                "properties": properties,
+                                "required": required
                             }
                         }
                         all_tools.append(tool)
@@ -559,9 +600,13 @@ class McpClients:
             tool_contents = []
             if action_type == ActionType.TOOL:
                 tool_contents = client.call_tool(tool_name, tool_args)
-            elif action_type == ActionType.RESOURCE:
-                resource = tool_action.action_feature
-                contents = client.read_resource(resource["uri"])
+            elif action_type in [ActionType.RESOURCE, ActionType.RESOURCE_TEMPLATE]:
+                if action_type == ActionType.RESOURCE:
+                    resource = tool_action.action_feature
+                    uri = resource["uri"]
+                else:
+                    uri = tool_args["uri"]
+                contents = client.read_resource(uri)
                 for content in contents:
                     if "text" in content:
                         tool_contents.append({
