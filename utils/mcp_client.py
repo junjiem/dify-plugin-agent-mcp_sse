@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -399,7 +400,9 @@ class ToolAction(BaseModel):
 
 
 class McpClients:
-    def __init__(self, servers_config: dict[str, Any], resources_as_tools: bool = False, prompts_as_tools: bool = False):
+    def __init__(self, servers_config: dict[str, Any],
+                 resources_as_tools: bool = False,
+                 prompts_as_tools: bool = False):
         if "mcpServers" in servers_config:
             servers_config = servers_config["mcpServers"]
         self._clients = {
@@ -414,6 +417,9 @@ class McpClients:
 
     @staticmethod
     def init_client(name: str, config: dict[str, Any]) -> McpClient:
+        if not re.fullmatch(r'^[a-zA-Z0-9_-]+$', name):
+            raise Exception(f"Invalid server name '{name}': string does not match pattern. "
+                            f"Expected a string that matches the pattern '^[a-zA-Z0-9_-]+$'.")
         transport = "sse"
         if "transport" in config:
             transport = config["transport"]
@@ -440,6 +446,8 @@ class McpClients:
                 tools = client.list_tools()
                 for tool in tools:
                     name = tool["name"]
+                    if name in self._tool_actions:
+                        name = f"{server_name}__{name}"
                     self._tool_actions[name] = ToolAction(
                         tool_name=name,
                         server_name=server_name,
@@ -453,21 +461,26 @@ class McpClients:
                     resources = client.list_resources()
                     for resource in resources:
                         resource_name = resource["name"]
-                        name = resource_name.replace(' ', '_').lower()
+                        name = (re.sub(r'[^a-zA-Z0-9 _-]', '', resource_name)
+                                .replace(' ', '_').lower())
+                        name = f"resource__{name}"
                         if name in self._tool_actions:
-                            name = uuid.uuid4().hex
-                        name = f"resource/{name}"
+                            name = f"{server_name}__{name}"
+                        if name in self._tool_actions:
+                            name = f"resource__{uuid.uuid4().hex}"
                         self._tool_actions[name] = ToolAction(
                             tool_name=name,
                             server_name=server_name,
                             action_type=ActionType.RESOURCE,
                             action_feature=resource,
                         )
+                        uri = resource["uri"]
                         resource_description = resource.get("description", "")
                         resource_mime_type = resource.get("mimeType", None)
                         resource_size = resource.get("size", None)
                         description = (
                                 f"Read the resource '{resource_name}' from MCP Server."
+                                f" URI: {uri}"
                                 + (f" Description: {resource_description}" if resource_description else "")
                                 + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
                                 + (f" Size: {resource_size}" if resource_size else "")
@@ -488,7 +501,9 @@ class McpClients:
                     prompts = client.list_prompts()
                     for prompt in prompts:
                         prompt_name = prompt["name"]
-                        name = f"prompt/{prompt_name}"
+                        name = f"prompt__{prompt_name}"
+                        if name in self._tool_actions:
+                            name = f"{server_name}__{name}"
                         self._tool_actions[name] = ToolAction(
                             tool_name=name,
                             server_name=server_name,
@@ -550,27 +565,27 @@ class McpClients:
                 for content in contents:
                     if "text" in content:
                         tool_contents.append({
-                          "type": "resource",
-                          "resource": {
-                            "uri": content["uri"],
-                            "mimeType": content.get("mimeType", "text/plain"),
-                            "text": content["text"]
-                          }
+                            "type": "resource",
+                            "resource": {
+                                "uri": content["uri"],
+                                "mimeType": content.get("mimeType", "text/plain"),
+                                "text": content["text"]
+                            }
                         })
                     elif "blob" in content:
                         tool_contents.append({
-                          "type": "resource",
-                          "resource": {
-                            "uri": content["uri"],
-                            "mimeType": content.get("mimeType", None),
-                            "blob": content["blob"]
-                          }
+                            "type": "resource",
+                            "resource": {
+                                "uri": content["uri"],
+                                "mimeType": content.get("mimeType", None),
+                                "blob": content["blob"]
+                            }
                         })
                     else:
                         raise Exception(f"Unsupported resource: {content}")
             elif action_type == ActionType.PROMPT:
-                name = tool_name[len("prompt/"):]
-                messages = client.get_prompt(name, tool_args)
+                prompt = tool_action.action_feature
+                messages = client.get_prompt(prompt["name"], tool_args)
                 text = ""
                 for message in messages:
                     role = message["role"]
@@ -578,8 +593,8 @@ class McpClients:
                     content_text = content.get("text", str(content))
                     text += f"{role}: {content_text}\n"
                 tool_contents.append({
-                  "type": "text",
-                  "text": text.strip()
+                    "type": "text",
+                    "text": text.strip()
                 })
             else:
                 raise Exception(f"Unsupported Action type: {action_type}")
