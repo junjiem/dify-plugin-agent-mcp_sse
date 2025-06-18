@@ -148,7 +148,8 @@ class ReActAgentStrategy(AgentStrategy):
         mcp_prompts_as_tools = react_params.mcp_prompts_as_tools
         if mcp_servers_config:
             try:
-                servers_config = json.loads(mcp_servers_config)
+                # Injected variable mcp_servers_config begin and end has double quotes.
+                servers_config = json.loads(mcp_servers_config.strip('"'))
             except json.JSONDecodeError as e:
                 raise ValueError(f"mcp_servers_config must be a valid JSON string: {e}")
             mcp_clients = McpClients(servers_config, mcp_resources_as_tools, mcp_prompts_as_tools)
