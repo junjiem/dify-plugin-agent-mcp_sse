@@ -517,7 +517,7 @@ class McpClients:
                                     "description": f"The URI of this resource. uriTemplate: {uri_template}"
                                 }
                             }
-                            required = ["uriTemplate"]
+                            required = ["uri"]
                         else:
                             raise Exception(f"Unsupported resource: {resource}")
                         self._tool_actions[name] = ToolAction(
