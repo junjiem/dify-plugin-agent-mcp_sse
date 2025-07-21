@@ -191,6 +191,12 @@ class ReActAgentStrategy(AgentStrategy):
                 self.recalc_llm_max_tokens(
                     model.entity, prompt_messages, model.completion_params
                 )
+
+            # prevent Claude LLM errors caused by extra whitespace.
+            for i, msg in enumerate(prompt_messages):
+                if hasattr(msg, "content") and isinstance(msg.content, str):
+                    msg.content = msg.content.strip()
+
             # invoke model
             chunks = self.session.model.llm.invoke(
                 model_config=LLMModelConfig(**model.model_dump(mode="json")),
