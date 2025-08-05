@@ -267,6 +267,8 @@ class McpSseClient(McpClient):
                     logger.info(f"message_id: {message_id}")
                     message = self.message_dict.pop(message_id, None)
                     logger.info(f"message: {message}")
+                    if message and message.get("method") == "ping":
+                        continue
                     return message
         return {}
 
