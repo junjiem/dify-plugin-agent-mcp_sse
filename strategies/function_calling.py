@@ -91,7 +91,8 @@ class FunctionCallingAgentStrategy(AgentStrategy):
         if mcp_servers_config:
             try:
                 # Injected variable mcp_servers_config begin and end has double quotes.
-                servers_config = json.loads(mcp_servers_config.strip('"'))
+                # non-breaking spaces (\xa0) are replaced with spaces because JSON not allow.
+                servers_config = json.loads(mcp_servers_config.strip('"').replace('\xa0', ' '))
             except json.JSONDecodeError as e:
                 raise ValueError(f"mcp_servers_config must be a valid JSON string: {e}")
             mcp_clients = McpClients(servers_config, mcp_resources_as_tools, mcp_prompts_as_tools)
