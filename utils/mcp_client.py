@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -438,6 +439,12 @@ class McpClients:
         self._resources_as_tools = resources_as_tools
         self._prompts_as_tools = prompts_as_tools
         self._tool_actions: dict[str, ToolAction] = {}
+        # 添加调用间隔配置和上次调用时间跟踪
+        self._call_intervals = {
+            name: config.get('call_interval', 0)
+            for name, config in servers_config.items()
+        }
+        self._last_call_times = {name: 0 for name in servers_config.keys()}
 
     @staticmethod
     def init_client(name: str, config: dict[str, Any]) -> McpClient:
@@ -600,6 +607,19 @@ class McpClients:
         logger.info(f"Executing tool! server name: {server_name}, tool name: {tool_name}, tool arguments: {tool_args}")
         if server_name not in self._clients:
             raise Exception(f"There is not a MCP Server named {server_name!r}")
+        
+        # 调用间隔控制逻辑
+        call_interval = self._call_intervals.get(server_name, 0)
+        if call_interval > 0:
+            current_time = time.time()
+            last_call_time = self._last_call_times.get(server_name, 0)
+            time_since_last_call = current_time - last_call_time
+            if time_since_last_call < call_interval:
+                wait_time = call_interval - time_since_last_call
+                logger.info(f"Waiting {wait_time:.2f} seconds before calling {server_name} due to call_interval={call_interval}")
+                time.sleep(wait_time)
+            self._last_call_times[server_name] = time.time()
+        
         client = self._clients[server_name]
         action_type = tool_action.action_type
         try:

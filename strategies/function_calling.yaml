@@ -29,10 +29,9 @@ parameters:
     label:
       en_US: MCP Servers config
       zh_Hans: MCP 服务配置
-    default: "{\n  \"server_name1\": {\n    \"transport\": \"sse\",\n    \"url\": \"http://127.0.0.1:8000/sse\"\n  },
-    \n  \"server_name2\": {\n    \"transport\": \"streamable_http\",\n    \"url\": \"http://127.0.0.1:8000/mcp\"\n  }\n}"
+    default: "{\n  \"server_name1\": {\n    \"transport\": \"sse\",\n    \"url\": \"http://127.0.0.1:8000/sse\",\n    \"call_interval\": 0\n  },\n  \"server_name2\": {\n    \"transport\": \"streamable_http\",\n    \"url\": \"http://127.0.0.1:8000/mcp\",\n    \"call_interval\": 0\n  }\n}"
     help:
-      en_US: "MCP Servers config, support multiple MCP Server."
+      en_US: "MCP Servers config, support multiple MCP Server. "
       zh_Hans: "MCP服务配置，支持多个MCP服务。"
   - name: mcp_resources_as_tools
     type: boolean
