@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed, Executor, Future, wait
 from enum import Enum
 from itertools import chain
-from threading import Event, Thread
+from threading import Event, Thread, Lock
 from typing import Any, Iterator
 from urllib.parse import urljoin, urlparse
 
@@ -435,6 +435,7 @@ class McpClients:
             name: self.init_client(name, config)
             for name, config in servers_config.items()
         }
+        self._tool_actions_lock = Lock()
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(client.initialize) for client in self._clients.values()]
             wait(futures)
@@ -471,12 +472,13 @@ class McpClients:
             name = tool["name"]
             if name in self._tool_actions:
                 name = f"{server_name}__{name}"
-            self._tool_actions[name] = ToolAction(
-                tool_name=name,
-                server_name=server_name,
-                action_type=ActionType.TOOL,
-                action_feature=tool,
-            )
+            with self._tool_actions_lock:
+                self._tool_actions[name] = ToolAction(
+                    tool_name=name,
+                    server_name=server_name,
+                    action_type=ActionType.TOOL,
+                    action_feature=tool,
+                )
             yield tool
 
     def _iter_resources(self, server_name: str, client: McpClient) -> Iterator[dict]:
@@ -524,12 +526,13 @@ class McpClients:
                 required = ["uri"]
             else:
                 raise Exception(f"Unsupported resource: {resource}")
-            self._tool_actions[name] = ToolAction(
-                tool_name=name,
-                server_name=server_name,
-                action_type=action_type,
-                action_feature=resource,
-            )
+            with self._tool_actions_lock:
+                self._tool_actions[name] = ToolAction(
+                    tool_name=name,
+                    server_name=server_name,
+                    action_type=action_type,
+                    action_feature=resource,
+                )
             tool = {
                 "name": name,
                 "description": description,
@@ -548,12 +551,13 @@ class McpClients:
             name = f"prompt__{prompt_name}"
             if name in self._tool_actions:
                 name = f"{server_name}__{name}"
-            self._tool_actions[name] = ToolAction(
-                tool_name=name,
-                server_name=server_name,
-                action_type=ActionType.PROMPT,
-                action_feature=prompt,
-            )
+            with self._tool_actions_lock:
+                self._tool_actions[name] = ToolAction(
+                    tool_name=name,
+                    server_name=server_name,
+                    action_type=ActionType.PROMPT,
+                    action_feature=prompt,
+                )
             prompt_description = prompt.get("description", "")
             description = (
                     f"Use the prompt template '{prompt_name}' from MCP Server."
