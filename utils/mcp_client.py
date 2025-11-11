@@ -2,9 +2,11 @@ import logging
 import re
 import uuid
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed, Executor, Future
 from enum import Enum
+from itertools import chain
 from threading import Event, Thread
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -462,131 +464,141 @@ class McpClients:
             sse_read_timeout=config.get("sse_read_timeout", 50),
         )
 
+    def _iter_tools(self, server_name: str, client: McpClient) -> Iterator[dict]:
+        tools = client.list_tools()
+        for tool in tools:
+            name = tool["name"]
+            if name in self._tool_actions:
+                name = f"{server_name}__{name}"
+            self._tool_actions[name] = ToolAction(
+                tool_name=name,
+                server_name=server_name,
+                action_type=ActionType.TOOL,
+                action_feature=tool,
+            )
+            yield tool
+
+    def _iter_resources(self, server_name: str, client: McpClient) -> Iterator[dict]:
+        resources = client.list_resources()
+        resources_templates = client.list_resources_templates()
+        for resource in resources + resources_templates:
+            resource_name = resource["name"]
+            name = (re.sub(r'[^a-zA-Z0-9 _-]', '', resource_name)
+                    .replace(' ', '_').lower())
+            name = f"resource__{name}"
+            if name in self._tool_actions:
+                name = f"{server_name}__{name}"
+            if name in self._tool_actions:
+                name = f"resource__{uuid.uuid4().hex}"
+            resource_description = resource.get("description", "")
+            resource_mime_type = resource.get("mimeType", None)
+            properties = {}
+            required = []
+            if "uri" in resource:
+                uri = resource["uri"]
+                action_type = ActionType.RESOURCE
+                resource_size = resource.get("size", None)
+                description = (
+                        f"Read the resource '{resource_name}' from MCP Server."
+                        f" URI: {uri}"
+                        + (f" Description: {resource_description}" if resource_description else "")
+                        + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
+                        + (f" Size: {resource_size}" if resource_size else "")
+                )
+            elif "uriTemplate" in resource:
+                uri_template = resource["uriTemplate"]
+                action_type = ActionType.RESOURCE_TEMPLATE
+                description = (
+                        f"Read the resource '{resource_name}' from MCP Server."
+                        f" URI template: {uri_template}"
+                        + (f" Description: {resource_description}" if resource_description else "")
+                        + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
+                )
+                properties = {
+                    "uri": {
+                        "type": "string",
+                        "description": f"The URI of this resource. uriTemplate: {uri_template}"
+                    }
+                }
+                required = ["uri"]
+            else:
+                raise Exception(f"Unsupported resource: {resource}")
+            self._tool_actions[name] = ToolAction(
+                tool_name=name,
+                server_name=server_name,
+                action_type=action_type,
+                action_feature=resource,
+            )
+            tool = {
+                "name": name,
+                "description": description,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required
+                }
+            }
+            yield tool
+
+    def _iter_prompts(self, server_name: str, client: McpClient) -> Iterator[dict]:
+        prompts = client.list_prompts()
+        for prompt in prompts:
+            prompt_name = prompt["name"]
+            name = f"prompt__{prompt_name}"
+            if name in self._tool_actions:
+                name = f"{server_name}__{name}"
+            self._tool_actions[name] = ToolAction(
+                tool_name=name,
+                server_name=server_name,
+                action_type=ActionType.PROMPT,
+                action_feature=prompt,
+            )
+            prompt_description = prompt.get("description", "")
+            description = (
+                    f"Use the prompt template '{prompt_name}' from MCP Server."
+                    + (f" Description: {prompt_description}" if prompt_description else "")
+            )
+            prompt_arguments = prompt.get("arguments", [])
+            properties = {}
+            required = []
+            for prompt_argument in prompt_arguments:
+                argument_name = prompt_argument["name"]
+                argument_description = prompt_argument.get("description", "")
+                properties[argument_name] = {
+                    "type": "string",
+                    "description": argument_description
+                }
+                if prompt_argument.get("required", False):
+                    required.append(argument_name)
+            tool = {
+                "name": name,
+                "description": description,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required
+                }
+            }
+            yield tool
+
+    def _iter_all_tools_futures(self, server_name: str, client: McpClient, executor: Executor) -> Iterator[Future]:
+        yield executor.submit(self._iter_tools, server_name, client)
+        if self._resources_as_tools:
+            yield executor.submit(self._iter_resources, server_name, client)
+        if self._prompts_as_tools:
+            yield executor.submit(self._iter_prompts, server_name, client)
+
     def fetch_tools(self) -> list[dict]:
         try:
-            all_tools = []
-            for server_name, client in self._clients.items():
-                # tools list
-                tools = client.list_tools()
-                for tool in tools:
-                    name = tool["name"]
-                    if name in self._tool_actions:
-                        name = f"{server_name}__{name}"
-                    self._tool_actions[name] = ToolAction(
-                        tool_name=name,
-                        server_name=server_name,
-                        action_type=ActionType.TOOL,
-                        action_feature=tool,
-                    )
-                    all_tools.append(tool)
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = tuple(chain.from_iterable((
+                    self._iter_all_tools_futures(server_name=server_name, client=client, executor=executor)
+                    for server_name, client in self._clients.items()
+                )))
+                all_tools = list(chain.from_iterable((future.result() for future in as_completed(futures))))
 
-                # resources and resources templates list
-                if self._resources_as_tools:
-                    resources = client.list_resources()
-                    resources_templates = client.list_resources_templates()
-                    for resource in resources + resources_templates:
-                        resource_name = resource["name"]
-                        name = (re.sub(r'[^a-zA-Z0-9 _-]', '', resource_name)
-                                .replace(' ', '_').lower())
-                        name = f"resource__{name}"
-                        if name in self._tool_actions:
-                            name = f"{server_name}__{name}"
-                        if name in self._tool_actions:
-                            name = f"resource__{uuid.uuid4().hex}"
-                        resource_description = resource.get("description", "")
-                        resource_mime_type = resource.get("mimeType", None)
-                        properties = {}
-                        required = []
-                        if "uri" in resource:
-                            uri = resource["uri"]
-                            action_type = ActionType.RESOURCE
-                            resource_size = resource.get("size", None)
-                            description = (
-                                    f"Read the resource '{resource_name}' from MCP Server."
-                                    f" URI: {uri}"
-                                    + (f" Description: {resource_description}" if resource_description else "")
-                                    + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
-                                    + (f" Size: {resource_size}" if resource_size else "")
-                            )
-                        elif "uriTemplate" in resource:
-                            uri_template = resource["uriTemplate"]
-                            action_type = ActionType.RESOURCE_TEMPLATE
-                            description = (
-                                    f"Read the resource '{resource_name}' from MCP Server."
-                                    f" URI template: {uri_template}"
-                                    + (f" Description: {resource_description}" if resource_description else "")
-                                    + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
-                            )
-                            properties = {
-                                "uri": {
-                                    "type": "string",
-                                    "description": f"The URI of this resource. uriTemplate: {uri_template}"
-                                }
-                            }
-                            required = ["uri"]
-                        else:
-                            raise Exception(f"Unsupported resource: {resource}")
-                        self._tool_actions[name] = ToolAction(
-                            tool_name=name,
-                            server_name=server_name,
-                            action_type=action_type,
-                            action_feature=resource,
-                        )
-                        tool = {
-                            "name": name,
-                            "description": description,
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": properties,
-                                "required": required
-                            }
-                        }
-                        all_tools.append(tool)
-
-                # prompts list
-                if self._prompts_as_tools:
-                    prompts = client.list_prompts()
-                    for prompt in prompts:
-                        prompt_name = prompt["name"]
-                        name = f"prompt__{prompt_name}"
-                        if name in self._tool_actions:
-                            name = f"{server_name}__{name}"
-                        self._tool_actions[name] = ToolAction(
-                            tool_name=name,
-                            server_name=server_name,
-                            action_type=ActionType.PROMPT,
-                            action_feature=prompt,
-                        )
-                        prompt_description = prompt.get("description", "")
-                        description = (
-                                f"Use the prompt template '{prompt_name}' from MCP Server."
-                                + (f" Description: {prompt_description}" if prompt_description else "")
-                        )
-                        prompt_arguments = prompt.get("arguments", [])
-                        properties = {}
-                        required = []
-                        for prompt_argument in prompt_arguments:
-                            argument_name = prompt_argument["name"]
-                            argument_description = prompt_argument.get("description", "")
-                            properties[argument_name] = {
-                                "type": "string",
-                                "description": argument_description
-                            }
-                            if prompt_argument.get("required", False):
-                                required.append(argument_name)
-                        tool = {
-                            "name": name,
-                            "description": description,
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": properties,
-                                "required": required
-                            }
-                        }
-                        all_tools.append(tool)
-
-            logger.info(f"Fetching tools: {all_tools}")
-            return all_tools
+                logger.info(f"Fetching tools: {all_tools}")
+                return all_tools
         except Exception as e:
             raise Exception(f"Error fetching tools: {str(e)}")
 
