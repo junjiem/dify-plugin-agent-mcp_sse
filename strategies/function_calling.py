@@ -1,10 +1,10 @@
-import json
 import time
 from collections.abc import Generator
 from copy import deepcopy
 from typing import Any, Optional, cast
 
 import pydantic
+import orjson
 from dify_plugin.entities.agent import AgentInvokeMessage
 from dify_plugin.entities.model import ModelFeature
 from dify_plugin.entities.model.llm import (
@@ -91,8 +91,8 @@ class FunctionCallingAgentStrategy(AgentStrategy):
         if mcp_servers_config:
             try:
                 # Injected variable mcp_servers_config begin and end has double quotes.
-                servers_config = json.loads(mcp_servers_config.strip('"'))
-            except json.JSONDecodeError as e:
+                servers_config = orjson.loads(mcp_servers_config.strip('"'))
+            except orjson.JSONDecodeError as e:
                 raise ValueError(f"mcp_servers_config must be a valid JSON string: {e}")
             mcp_clients = McpClients(servers_config, mcp_resources_as_tools, mcp_prompts_as_tools)
             mcp_tools = mcp_clients.fetch_tools()
@@ -293,9 +293,9 @@ class FunctionCallingAgentStrategy(AgentStrategy):
                                 type="function",
                                 function=AssistantPromptMessage.ToolCall.ToolCallFunction(
                                     name=tool_call_name,
-                                    arguments=json.dumps(
-                                        tool_call_args, ensure_ascii=False
-                                    ),
+                                    arguments=orjson.dumps(
+                                        tool_call_args
+                                    ).decode("utf-8"),
                                 ),
                             )
                         ],
@@ -341,13 +341,13 @@ class FunctionCallingAgentStrategy(AgentStrategy):
                                 if item["type"] == "text":
                                     result = item["text"]
                                 elif item["type"] in ("image", "video"):
-                                    result = json.dumps(item, ensure_ascii=False)
+                                    result = orjson.dumps(item).decode("utf-8")
                                 elif item["type"] == "resource":
-                                    result = json.dumps(item['resource'], ensure_ascii=False)
+                                    result = orjson.dumps(item['resource']).decode("utf-8")
                                 else:
-                                    result = json.dumps(item, ensure_ascii=False)
+                                    result = orjson.dumps(item).decode("utf-8")
                             else:
-                                result = json.dumps(content, ensure_ascii=False)
+                                result = orjson.dumps(content).decode("utf-8")
                         else:
                             # invoke tool
                             tool_invoke_parameters = {**tool_instance.runtime_parameters, **tool_call_args}
@@ -375,10 +375,9 @@ class FunctionCallingAgentStrategy(AgentStrategy):
                                             + "you do not need to create it, just tell the user to check it now."
                                     )
                                 elif response.type == ToolInvokeMessage.MessageType.JSON:
-                                    text = json.dumps(
+                                    text = orjson.dumps(
                                         cast(ToolInvokeMessage.JsonMessage, response.message).json_object,
-                                        ensure_ascii=False,
-                                    )
+                                    ).decode("utf-8")
                                     result += f"tool response: {text}."
                                 else:
                                     result += f"tool response: {response.message!r}."
@@ -494,7 +493,7 @@ class FunctionCallingAgentStrategy(AgentStrategy):
         for prompt_message in llm_result_chunk.delta.message.tool_calls:
             args = {}
             if prompt_message.function.arguments != "":
-                args = json.loads(prompt_message.function.arguments)
+                args = orjson.loads(prompt_message.function.arguments)
 
             tool_calls.append(
                 (
@@ -519,7 +518,7 @@ class FunctionCallingAgentStrategy(AgentStrategy):
         for prompt_message in llm_result.message.tool_calls:
             args = {}
             if prompt_message.function.arguments != "":
-                args = json.loads(prompt_message.function.arguments)
+                args = orjson.loads(prompt_message.function.arguments)
 
             tool_calls.append(
                 (

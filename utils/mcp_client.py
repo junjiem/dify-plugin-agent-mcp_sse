@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 import uuid
@@ -9,6 +8,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
+import orjson
 from dify_plugin.config.logger_format import plugin_logger_handler
 from httpx_sse import connect_sse, EventSource
 from pydantic import BaseModel
@@ -232,7 +232,7 @@ class McpSseClient(McpClient):
                                 logger.error(error_msg)
                                 raise ValueError(error_msg)
                         case "message":
-                            message = json.loads(sse.data)
+                            message = orjson.loads(sse.data)
                             logger.debug(f"{self.name} - Received server message: {message}")
                             self.message_dict[message["id"]] = message
                             self.response_ready.set()
@@ -374,7 +374,7 @@ class McpStreamableHttpClient(McpClient):
             for sse in EventSource(response).iter_sse():
                 if sse.event != "message":
                     raise Exception(f"{self.name} - Unknown Server-Sent Event: {sse.event}")
-                message = json.loads(sse.data)
+                message = orjson.loads(sse.data)
         elif "application/json" in content_type:
             message = (response.json() if response.content else None) or {}
         else:
