@@ -2,7 +2,7 @@ import logging
 import re
 import uuid
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, as_completed, Executor, Future
+from concurrent.futures import ThreadPoolExecutor, as_completed, Executor, Future, wait
 from enum import Enum
 from itertools import chain
 from threading import Event, Thread
@@ -435,8 +435,9 @@ class McpClients:
             name: self.init_client(name, config)
             for name, config in servers_config.items()
         }
-        for client in self._clients.values():
-            client.initialize()
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(client.initialize) for client in self._clients.values()]
+            wait(futures)
         self._resources_as_tools = resources_as_tools
         self._prompts_as_tools = prompts_as_tools
         self._tool_actions: dict[str, ToolAction] = {}
