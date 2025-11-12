@@ -439,6 +439,8 @@ class McpClients:
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(client.initialize) for client in self._clients.values()]
             wait(futures)
+            for f in futures:
+                f.result()
         self._resources_as_tools = resources_as_tools
         self._prompts_as_tools = prompts_as_tools
         self._tool_actions: dict[str, ToolAction] = {}
