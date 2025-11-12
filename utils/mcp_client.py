@@ -589,11 +589,11 @@ class McpClients:
             yield tool
 
     def _iter_all_tools_futures(self, server_name: str, client: McpClient, executor: Executor) -> Iterator[Future]:
-        yield executor.submit(self._iter_tools, server_name, client)
+        yield executor.submit(lambda: list(self._iter_tools(server_name, client)))
         if self._resources_as_tools:
-            yield executor.submit(self._iter_resources, server_name, client)
+            yield executor.submit(lambda: list(self._iter_resources(server_name, client)))
         if self._prompts_as_tools:
-            yield executor.submit(self._iter_prompts, server_name, client)
+            yield executor.submit(lambda: list(self._iter_prompts(server_name, client)))
 
     def fetch_tools(self) -> list[dict]:
         try:
@@ -602,7 +602,7 @@ class McpClients:
                     self._iter_all_tools_futures(server_name=server_name, client=client, executor=executor)
                     for server_name, client in self._clients.items()
                 )))
-                all_tools = list(chain.from_iterable((future.result() for future in as_completed(futures))))
+                all_tools = list(chain.from_iterable(future.result() for future in as_completed(futures)))
 
                 logger.info(f"Fetching tools: {all_tools}")
                 return all_tools
