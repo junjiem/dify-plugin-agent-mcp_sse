@@ -472,9 +472,9 @@ class McpClients:
         tools = client.list_tools()
         for tool in tools:
             name = tool["name"]
-            if name in self._tool_actions:
-                name = f"{server_name}__{name}"
             with self._tool_actions_lock:
+                if name in self._tool_actions:
+                    name = f"{server_name}__{name}"
                 self._tool_actions[name] = ToolAction(
                     tool_name=name,
                     server_name=server_name,
@@ -491,10 +491,6 @@ class McpClients:
             name = (re.sub(r'[^a-zA-Z0-9 _-]', '', resource_name)
                     .replace(' ', '_').lower())
             name = f"resource__{name}"
-            if name in self._tool_actions:
-                name = f"{server_name}__{name}"
-            if name in self._tool_actions:
-                name = f"resource__{uuid.uuid4().hex}"
             resource_description = resource.get("description", "")
             resource_mime_type = resource.get("mimeType", None)
             properties = {}
@@ -529,6 +525,10 @@ class McpClients:
             else:
                 raise Exception(f"Unsupported resource: {resource}")
             with self._tool_actions_lock:
+                if name in self._tool_actions:
+                    name = f"{server_name}__{name}"
+                if name in self._tool_actions:
+                    name = f"resource__{uuid.uuid4().hex}"
                 self._tool_actions[name] = ToolAction(
                     tool_name=name,
                     server_name=server_name,
@@ -551,9 +551,9 @@ class McpClients:
         for prompt in prompts:
             prompt_name = prompt["name"]
             name = f"prompt__{prompt_name}"
-            if name in self._tool_actions:
-                name = f"{server_name}__{name}"
             with self._tool_actions_lock:
+                if name in self._tool_actions:
+                    name = f"{server_name}__{name}"
                 self._tool_actions[name] = ToolAction(
                     tool_name=name,
                     server_name=server_name,
