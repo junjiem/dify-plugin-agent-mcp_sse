@@ -5,13 +5,14 @@ from typing import Any, Optional, cast
 
 import pydantic
 from dify_plugin.entities.agent import AgentInvokeMessage
+from dify_plugin.entities.model import ModelFeature
 from dify_plugin.entities.model.llm import LLMModelConfig, LLMUsage
 from dify_plugin.entities.model.message import (
     AssistantPromptMessage,
     PromptMessage,
     SystemPromptMessage,
     UserPromptMessage,
-    PromptMessageTool,
+    PromptMessageTool, PromptMessageContentType,
 )
 from dify_plugin.entities.tool import (
     LogMetadata,
@@ -98,6 +99,32 @@ class ReActAgentStrategy(AgentStrategy):
 
         return SystemPromptMessage(content=system_prompt)
 
+    def _iter_cleanup_history_prompt_messages(self, model: AgentModelConfig):
+        """
+        remove history_prompt_message if model not support
+        :param model
+        :return:
+        """
+        for msg in model.history_prompt_messages:
+            if isinstance(msg.content, list):
+                filtered_content = [
+                    item
+                    for item in msg.content
+                    if (
+                            item.type == PromptMessageContentType.TEXT
+                            or (item.type == PromptMessageContentType.IMAGE and ModelFeature.VISION in model.entity.features)
+                    )
+                ]
+                new_msg = PromptMessage(
+                    role=msg.role,
+                    content=filtered_content,
+                    name=msg.name,
+                )
+                yield new_msg
+            else:
+                yield msg
+
+
     def _invoke(self, parameters: dict[str, Any]) -> Generator[AgentInvokeMessage]:
         """
         Run ReAct agent application
@@ -133,7 +160,8 @@ class ReActAgentStrategy(AgentStrategy):
             stop.append("Observation")
 
         # Init prompts
-        self.history_prompt_messages = model.history_prompt_messages
+        self.history_prompt_messages = list(self._iter_cleanup_history_prompt_messages(model))
+
 
         # convert tools into ModelRuntime Tool format
         tools = react_params.tools
