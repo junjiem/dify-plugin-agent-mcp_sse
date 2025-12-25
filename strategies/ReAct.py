@@ -112,7 +112,12 @@ class ReActAgentStrategy(AgentStrategy):
                     for item in msg.content
                     if (
                             item.type == PromptMessageContentType.TEXT
-                            or (item.type == PromptMessageContentType.IMAGE and ModelFeature.VISION in model.entity.features)
+                            or (item.type in {
+                                PromptMessageContentType.IMAGE, PromptMessageContentType.VIDEO, ModelFeature.DOCUMENT
+                            } and ModelFeature.VISION in model.entity.features)
+                            or (item.type == PromptMessageContentType.AUDIO and ModelFeature.AUDIO in model.entity.features)
+                            or (item.type == PromptMessageContentType.VIDEO and ModelFeature.VIDEO in model.entity.features)
+                            or (item.type == PromptMessageContentType.DOCUMENT and ModelFeature.DOCUMENT in model.entity.features)
                     )
                 ]
                 new_msg = PromptMessage(
@@ -507,7 +512,6 @@ class ReActAgentStrategy(AgentStrategy):
         :param tool_instances: tool instances
         :param mcp_tool_instances: MCP tool instances
         :param message_file_ids: message file ids
-        :param trace_manager: trace manager
         :return: observation, meta
         """
         # action is tool call, invoke tool
