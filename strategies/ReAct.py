@@ -113,7 +113,8 @@ class ReActAgentStrategy(AgentStrategy):
                     if (
                             item.type == PromptMessageContentType.TEXT
                             or (item.type in {
-                                PromptMessageContentType.IMAGE, PromptMessageContentType.VIDEO, ModelFeature.DOCUMENT
+                                PromptMessageContentType.IMAGE, PromptMessageContentType.VIDEO,
+                                PromptMessageContentType.DOCUMENT,
                             } and ModelFeature.VISION in model.entity.features)
                             or (item.type == PromptMessageContentType.AUDIO and ModelFeature.AUDIO in model.entity.features)
                             or (item.type == PromptMessageContentType.VIDEO and ModelFeature.VIDEO in model.entity.features)
