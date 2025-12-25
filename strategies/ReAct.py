@@ -120,7 +120,7 @@ class ReActAgentStrategy(AgentStrategy):
                             or (item.type == PromptMessageContentType.DOCUMENT and ModelFeature.DOCUMENT in model.entity.features)
                     )
                 ]
-                new_msg = PromptMessage(
+                new_msg = msg.__class__(
                     role=msg.role,
                     content=filtered_content,
                     name=msg.name,
