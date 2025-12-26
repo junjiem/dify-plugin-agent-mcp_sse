@@ -149,6 +149,7 @@ class ReActAgentStrategy(AgentStrategy):
         run_agent_state = True
         llm_usage: dict[str, Optional[LLMUsage]] = {"usage": None}
         final_answer = ""
+        empty_answer = "I am thinking about how to help you"  # the default answer when llm didn't response right format
         prompt_messages = []
 
         # Init model
@@ -280,7 +281,7 @@ class ReActAgentStrategy(AgentStrategy):
             scratchpad.thought = (
                 scratchpad.thought.strip()
                 if scratchpad.thought
-                else "I am thinking about how to help you"
+                else empty_answer
             )
             agent_scratchpad.append(scratchpad)
 
@@ -316,7 +317,10 @@ class ReActAgentStrategy(AgentStrategy):
                     else 0,
                 },
             )
-            if not scratchpad.action:
+            if not scratchpad.action and scratchpad.thought == empty_answer and iteration_step < max_iteration_steps:
+                # llm response wrong format, retry until exceed max_iteration_steps
+                run_agent_state = True
+            elif not scratchpad.action:
                 final_answer = scratchpad.thought
             else:
                 if scratchpad.action.action_name.lower() == "final answer":
