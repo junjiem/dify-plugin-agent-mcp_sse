@@ -5,13 +5,14 @@ from typing import Any, Optional, cast
 import orjson
 import pydantic
 from dify_plugin.entities.agent import AgentInvokeMessage
+from dify_plugin.entities.model import ModelFeature
 from dify_plugin.entities.model.llm import LLMModelConfig, LLMUsage
 from dify_plugin.entities.model.message import (
     AssistantPromptMessage,
     PromptMessage,
     SystemPromptMessage,
     UserPromptMessage,
-    PromptMessageTool,
+    PromptMessageTool, PromptMessageContentType,
 )
 from dify_plugin.entities.tool import (
     LogMetadata,
@@ -97,6 +98,38 @@ class ReActAgentStrategy(AgentStrategy):
 
         return SystemPromptMessage(content=system_prompt)
 
+    def _iter_cleanup_history_prompt_messages(self, model: AgentModelConfig):
+        """
+        remove history_prompt_message if model not support
+        :param model
+        :return:
+        """
+        for msg in model.history_prompt_messages:
+            if isinstance(msg.content, list):
+                filtered_content = [
+                    item
+                    for item in msg.content
+                    if (
+                            item.type == PromptMessageContentType.TEXT
+                            or (item.type in {
+                                PromptMessageContentType.IMAGE, PromptMessageContentType.VIDEO,
+                                PromptMessageContentType.DOCUMENT,
+                            } and ModelFeature.VISION in model.entity.features)
+                            or (item.type == PromptMessageContentType.AUDIO and ModelFeature.AUDIO in model.entity.features)
+                            or (item.type == PromptMessageContentType.VIDEO and ModelFeature.VIDEO in model.entity.features)
+                            or (item.type == PromptMessageContentType.DOCUMENT and ModelFeature.DOCUMENT in model.entity.features)
+                    )
+                ]
+                new_msg = msg.__class__(
+                    role=msg.role,
+                    content=filtered_content,
+                    name=msg.name,
+                )
+                yield new_msg
+            else:
+                yield msg
+
+
     def _invoke(self, parameters: dict[str, Any]) -> Generator[AgentInvokeMessage]:
         """
         Run ReAct agent application
@@ -132,7 +165,8 @@ class ReActAgentStrategy(AgentStrategy):
             stop.append("Observation")
 
         # Init prompts
-        self.history_prompt_messages = model.history_prompt_messages
+        self.history_prompt_messages = list(self._iter_cleanup_history_prompt_messages(model))
+
 
         # convert tools into ModelRuntime Tool format
         tools = react_params.tools
@@ -478,7 +512,6 @@ class ReActAgentStrategy(AgentStrategy):
         :param tool_instances: tool instances
         :param mcp_tool_instances: MCP tool instances
         :param message_file_ids: message file ids
-        :param trace_manager: trace manager
         :return: observation, meta
         """
         # action is tool call, invoke tool
