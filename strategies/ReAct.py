@@ -532,11 +532,17 @@ class ReActAgentStrategy(AgentStrategy):
             try:
                 tool_call_args = orjson.loads(tool_call_args)
             except orjson.JSONDecodeError as e:
-                params = [
-                    param.name
-                    for param in tool_instance.parameters
-                    if param.form == ToolParameter.ToolParameterForm.LLM
-                ]
+                if tool_instance is not None:
+                    params = [
+                        param.name
+                        for param in tool_instance.parameters
+                        if param.form == ToolParameter.ToolParameterForm.LLM
+                    ]
+                else:
+                    params = [
+                        param
+                        for param in mcp_tool_instance.get('inputSchema', {}).get('properties', {}).keys()
+                    ]
                 if len(params) > 1:
                     raise ValueError("tool call args is not a valid json string") from e
                 tool_call_args = {params[0]: tool_call_args} if len(params) == 1 else {}
