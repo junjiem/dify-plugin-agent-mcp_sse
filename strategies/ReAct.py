@@ -5,14 +5,13 @@ from typing import Any, Optional, cast
 import orjson
 import pydantic
 from dify_plugin.entities.agent import AgentInvokeMessage
-from dify_plugin.entities.model import ModelFeature
 from dify_plugin.entities.model.llm import LLMModelConfig, LLMUsage
 from dify_plugin.entities.model.message import (
     AssistantPromptMessage,
     PromptMessage,
     SystemPromptMessage,
     UserPromptMessage,
-    PromptMessageTool, PromptMessageContentType,
+    PromptMessageTool,
 )
 from dify_plugin.entities.tool import (
     LogMetadata,
@@ -30,6 +29,7 @@ from pydantic import BaseModel
 
 from output_parser.cot_output_parser import CotAgentOutputParser
 from prompt.template import REACT_PROMPT_TEMPLATES
+from strategies.base import FilterHistoryMessageByModelFeaturesMixin
 from utils.mcp_client import McpClients
 
 ignore_observation_providers = ["wenxin"]
@@ -55,7 +55,7 @@ class AgentPromptEntity(BaseModel):
     next_iteration: str
 
 
-class ReActAgentStrategy(AgentStrategy):
+class ReActAgentStrategy(FilterHistoryMessageByModelFeaturesMixin, AgentStrategy):
     def __init__(self, runtime, session):
         super().__init__(runtime, session)
         self.query = ""
@@ -98,37 +98,6 @@ class ReActAgentStrategy(AgentStrategy):
 
         return SystemPromptMessage(content=system_prompt)
 
-    def _iter_cleanup_history_prompt_messages(self, model: AgentModelConfig):
-        """
-        remove history_prompt_message if model not support
-        :param model
-        :return:
-        """
-        for msg in model.history_prompt_messages:
-            if isinstance(msg.content, list):
-                filtered_content = [
-                    item
-                    for item in msg.content
-                    if (
-                            item.type == PromptMessageContentType.TEXT
-                            or (item.type in {
-                                PromptMessageContentType.IMAGE, PromptMessageContentType.VIDEO,
-                                PromptMessageContentType.DOCUMENT,
-                            } and ModelFeature.VISION in model.entity.features)
-                            or (item.type == PromptMessageContentType.AUDIO and ModelFeature.AUDIO in model.entity.features)
-                            or (item.type == PromptMessageContentType.VIDEO and ModelFeature.VIDEO in model.entity.features)
-                            or (item.type == PromptMessageContentType.DOCUMENT and ModelFeature.DOCUMENT in model.entity.features)
-                    )
-                ]
-                new_msg = msg.__class__(
-                    role=msg.role,
-                    content=filtered_content,
-                    name=msg.name,
-                )
-                yield new_msg
-            else:
-                yield msg
-
 
     def _invoke(self, parameters: dict[str, Any]) -> Generator[AgentInvokeMessage]:
         """
@@ -150,7 +119,6 @@ class ReActAgentStrategy(AgentStrategy):
         llm_usage: dict[str, Optional[LLMUsage]] = {"usage": None}
         final_answer = ""
         empty_answer = "I am thinking about how to help you"  # the default answer when llm didn't response right format
-        prompt_messages = []
 
         # Init model
         model = react_params.model
