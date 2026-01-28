@@ -1,8 +1,8 @@
-import json
 import time
 from collections.abc import Generator, Mapping
 from typing import Any, Optional, cast
 
+import orjson
 import pydantic
 from dify_plugin.entities.agent import AgentInvokeMessage
 from dify_plugin.entities.model import ModelFeature
@@ -83,13 +83,12 @@ class ReActAgentStrategy(AgentStrategy):
             first_prompt.replace("{{instruction}}", self.instruction)
             .replace(
                 "{{tools}}",
-                json.dumps(
+                orjson.dumps(
                     [
                         tool.model_dump(mode="json")
                         for tool in self._prompt_messages_tools
                     ],
-                    ensure_ascii=False
-                ),
+                ).decode('utf-8'),
             )
             .replace(
                 "{{tool_names}}",
@@ -150,6 +149,7 @@ class ReActAgentStrategy(AgentStrategy):
         run_agent_state = True
         llm_usage: dict[str, Optional[LLMUsage]] = {"usage": None}
         final_answer = ""
+        empty_answer = "I am thinking about how to help you"  # the default answer when llm didn't response right format
         prompt_messages = []
 
         # Init model
@@ -183,8 +183,8 @@ class ReActAgentStrategy(AgentStrategy):
         if mcp_servers_config:
             try:
                 # Injected variable mcp_servers_config begin and end has double quotes.
-                servers_config = json.loads(mcp_servers_config.strip('"'))
-            except json.JSONDecodeError as e:
+                servers_config = orjson.loads(mcp_servers_config.strip('"'))
+            except orjson.JSONDecodeError as e:
                 raise ValueError(f"mcp_servers_config must be a valid JSON string: {e}")
             mcp_clients = McpClients(servers_config, mcp_resources_as_tools, mcp_prompts_as_tools)
             mcp_tools = mcp_clients.fetch_tools()
@@ -269,9 +269,9 @@ class ReActAgentStrategy(AgentStrategy):
                     action = chunk
                     # detect action
                     assert scratchpad.agent_response is not None
-                    scratchpad.agent_response += json.dumps(chunk.model_dump())
+                    scratchpad.agent_response += orjson.dumps(chunk.model_dump()).decode('utf-8')
 
-                    scratchpad.action_str = json.dumps(chunk.model_dump())
+                    scratchpad.action_str = orjson.dumps(chunk.model_dump()).decode('utf-8')
                     scratchpad.action = action
                 else:
                     scratchpad.agent_response = scratchpad.agent_response or ""
@@ -281,7 +281,7 @@ class ReActAgentStrategy(AgentStrategy):
             scratchpad.thought = (
                 scratchpad.thought.strip()
                 if scratchpad.thought
-                else "I am thinking about how to help you"
+                else empty_answer
             )
             agent_scratchpad.append(scratchpad)
 
@@ -317,19 +317,22 @@ class ReActAgentStrategy(AgentStrategy):
                     else 0,
                 },
             )
-            if not scratchpad.action:
+            if not scratchpad.action and scratchpad.thought == empty_answer and iteration_step < max_iteration_steps:
+                # llm response wrong format, retry until exceed max_iteration_steps
+                run_agent_state = True
+            elif not scratchpad.action:
                 final_answer = scratchpad.thought
             else:
                 if scratchpad.action.action_name.lower() == "final answer":
                     # action is final answer, return final answer directly
                     try:
                         if isinstance(scratchpad.action.action_input, dict):
-                            final_answer = json.dumps(scratchpad.action.action_input)
+                            final_answer = orjson.dumps(scratchpad.action.action_input).decode('utf-8')
                         elif isinstance(scratchpad.action.action_input, str):
                             final_answer = scratchpad.action.action_input
                         else:
                             final_answer = f"{scratchpad.action.action_input}"
-                    except json.JSONDecodeError:
+                    except orjson.JSONDecodeError:
                         final_answer = f"{scratchpad.action.action_input}"
                 else:
                     run_agent_state = True
@@ -527,13 +530,19 @@ class ReActAgentStrategy(AgentStrategy):
 
         if isinstance(tool_call_args, str):
             try:
-                tool_call_args = json.loads(tool_call_args)
-            except json.JSONDecodeError as e:
-                params = [
-                    param.name
-                    for param in tool_instance.parameters
-                    if param.form == ToolParameter.ToolParameterForm.LLM
-                ]
+                tool_call_args = orjson.loads(tool_call_args)
+            except orjson.JSONDecodeError as e:
+                if tool_instance is not None:
+                    params = [
+                        param.name
+                        for param in tool_instance.parameters
+                        if param.form == ToolParameter.ToolParameterForm.LLM
+                    ]
+                else:
+                    params = [
+                        param
+                        for param in mcp_tool_instance.get('inputSchema', {}).get('properties', {}).keys()
+                    ]
                 if len(params) > 1:
                     raise ValueError("tool call args is not a valid json string") from e
                 tool_call_args = {params[0]: tool_call_args} if len(params) == 1 else {}
@@ -552,13 +561,13 @@ class ReActAgentStrategy(AgentStrategy):
                     if item["type"] == "text":
                         result = item["text"]
                     elif item["type"] in ("image", "video"):
-                        result = json.dumps(item, ensure_ascii=False)
+                        result = orjson.dumps(item).decode('utf-8')
                     elif item["type"] == "resource":
-                        result = json.dumps(item['resource'], ensure_ascii=False)
+                        result = orjson.dumps(item['resource']).decode('utf-8')
                     else:
-                        result = json.dumps(item, ensure_ascii=False)
+                        result = orjson.dumps(item).decode('utf-8')
                 else:
-                    result = json.dumps(content, ensure_ascii=False)
+                    result = orjson.dumps(content).decode('utf-8')
             else:
                 # invoke tool
                 tool_invoke_parameters = {**tool_instance.runtime_parameters, **tool_call_args}
@@ -586,12 +595,11 @@ class ReActAgentStrategy(AgentStrategy):
                                 + "you do not need to create it, just tell the user to check it now."
                         )
                     elif response.type == ToolInvokeMessage.MessageType.JSON:
-                        text = json.dumps(
+                        text = orjson.dumps(
                             cast(
                                 ToolInvokeMessage.JsonMessage, response.message
                             ).json_object,
-                            ensure_ascii=False,
-                        )
+                        ).decode('utf-8')
                         result += f"tool response: {text}."
                     else:
                         result += f"tool response: {response.message!r}."
