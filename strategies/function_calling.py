@@ -31,6 +31,7 @@ from dify_plugin.interfaces.agent import (
 )
 from pydantic import BaseModel
 
+from strategies.base import FilterHistoryMessageByModelFeaturesMixin
 from utils.mcp_client import McpClients
 
 
@@ -45,7 +46,7 @@ class FunctionCallingParams(BaseModel):
     maximum_iterations: int = 3
 
 
-class FunctionCallingAgentStrategy(AgentStrategy):
+class FunctionCallingAgentStrategy(FilterHistoryMessageByModelFeaturesMixin, AgentStrategy):
     def __init__(self, runtime, session):
         super().__init__(runtime, session)
         self.query = ""
@@ -73,7 +74,7 @@ class FunctionCallingAgentStrategy(AgentStrategy):
         query = fc_params.query
         self.query = query
         self.instruction = fc_params.instruction or self.instruction
-        history_prompt_messages = fc_params.model.history_prompt_messages
+        history_prompt_messages = list(self._iter_cleanup_history_prompt_messages(fc_params.model))
         history_prompt_messages.insert(0, self._system_prompt_message)
         history_prompt_messages.append(self._user_prompt_message)
 
