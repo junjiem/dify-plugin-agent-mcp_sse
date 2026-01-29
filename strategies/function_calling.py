@@ -22,7 +22,8 @@ from dify_plugin.entities.model.message import (
     UserPromptMessage,
     PromptMessageTool,
 )
-from dify_plugin.entities.tool import LogMetadata, ToolInvokeMessage, ToolProviderType
+from dify_plugin.entities.provider_config import LogMetadata
+from dify_plugin.entities.tool import ToolInvokeMessage, ToolProviderType
 from dify_plugin.interfaces.agent import (
     AgentModelConfig,
     AgentStrategy,
@@ -46,10 +47,8 @@ class FunctionCallingParams(BaseModel):
 
 
 class FunctionCallingAgentStrategy(AgentStrategy):
-    def __init__(self, runtime, session):
-        super().__init__(runtime, session)
-        self.query = ""
-        self.instruction = ""
+    query = ""
+    instruction = ""
 
     @property
     def _user_prompt_message(self) -> UserPromptMessage:

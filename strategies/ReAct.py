@@ -14,8 +14,8 @@ from dify_plugin.entities.model.message import (
     UserPromptMessage,
     PromptMessageTool, PromptMessageContentType,
 )
+from dify_plugin.entities.provider_config import LogMetadata
 from dify_plugin.entities.tool import (
-    LogMetadata,
     ToolInvokeMessage,
     ToolParameter,
     ToolProviderType,
@@ -56,12 +56,10 @@ class AgentPromptEntity(BaseModel):
 
 
 class ReActAgentStrategy(AgentStrategy):
-    def __init__(self, runtime, session):
-        super().__init__(runtime, session)
-        self.query = ""
-        self.instruction = ""
-        self.history_prompt_messages = []
-        self.prompt_messages_tools = []
+    query = ""
+    instruction = ""
+    history_prompt_messages = []
+    prompt_messages_tools = []
 
     @property
     def _user_prompt_message(self) -> UserPromptMessage:
