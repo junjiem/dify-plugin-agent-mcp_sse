@@ -374,6 +374,8 @@ class McpStreamableHttpClient(McpClient):
         content_type = response.headers.get("content-type", "None")
         if "text/event-stream" in content_type:
             for sse in EventSource(response).iter_sse():
+                if sse.event == "ping":
+                    continue
                 if sse.event != "message":
                     raise Exception(f"{self.name} - Unknown Server-Sent Event: {sse.event}")
                 message = orjson.loads(sse.data)
