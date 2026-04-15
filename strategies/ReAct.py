@@ -1,9 +1,11 @@
+import logging
 import time
 from collections.abc import Generator, Mapping
 from typing import Any, Optional, cast
 
 import orjson
 import pydantic
+from dify_plugin.config.logger_format import plugin_logger_handler
 from dify_plugin.entities.agent import AgentInvokeMessage
 from dify_plugin.entities.model.llm import LLMModelConfig, LLMUsage
 from dify_plugin.entities.model.message import (
@@ -31,6 +33,11 @@ from output_parser.cot_output_parser import CotAgentOutputParser
 from prompt.template import REACT_PROMPT_TEMPLATES
 from strategies.base import FilterHistoryMessageByModelFeaturesMixin
 from utils.mcp_client import McpClients
+
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+logger.addHandler(plugin_logger_handler)
 
 ignore_observation_providers = ["wenxin"]
 
@@ -320,15 +327,22 @@ class ReActAgentStrategy(FilterHistoryMessageByModelFeaturesMixin, AgentStrategy
                         status=ToolInvokeMessage.LogMessage.LogStatus.START,
                     )
                     yield tool_call_log
-                    tool_invoke_response, tool_invoke_parameters = (
-                        self._handle_invoke_action(
-                            action=scratchpad.action,
-                            tool_instances=tool_instances,
-                            mcp_clients=mcp_clients,
-                            mcp_tool_instances=mcp_tool_instances,
-                            message_file_ids=message_file_ids,
+                    try:
+                        tool_invoke_response, tool_invoke_parameters = (
+                            self._handle_invoke_action(
+                                action=scratchpad.action,
+                                tool_instances=tool_instances,
+                                mcp_clients=mcp_clients,
+                                mcp_tool_instances=mcp_tool_instances,
+                                message_file_ids=message_file_ids,
+                            )
                         )
-                    )
+                    except ValueError as e:
+                        scratchpad.observation = str(e)
+                        scratchpad.agent_response = str(e)
+                        agent_scratchpad.append(scratchpad)
+                        iteration_step += 1
+                        continue
                     scratchpad.observation = tool_invoke_response
                     scratchpad.agent_response = tool_invoke_response
                     yield self.finish_log_message(
@@ -510,6 +524,7 @@ class ReActAgentStrategy(FilterHistoryMessageByModelFeaturesMixin, AgentStrategy
                         for param in mcp_tool_instance.get('inputSchema', {}).get('properties', {}).keys()
                     ]
                 if len(params) > 1:
+                    logger.error(f"Tool call args invalid {tool_call_name=}: {tool_call_args}")
                     raise ValueError("tool call args is not a valid json string") from e
                 tool_call_args = {params[0]: tool_call_args} if len(params) == 1 else {}
 
